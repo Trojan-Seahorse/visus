@@ -65,28 +65,62 @@
 
 ## Agent 自动调用配置
 
-如果你使用 Claude Code / CherryStudio 等 Agent，将以下规则加入 Agent 人格文件（`SOUL.md` 或 `CLAUDE.md`），Agent 会自动识别场景并调用对应脚本。
+如果你使用 Claude Code / CherryStudio 等 Agent，将以下规则加入 Agent 人格文件（`SOUL.md` 或 `CLAUDE.md`），Agent 会自动识别场景并选择最优路径。
 
 路径示例中的 `./scripts/` 需替换为你的脚本实际存放路径。
 
 ```markdown
-## 图像能力
+## 图像与视觉能力
 
-我的主模型不能看图也不能生图。通过 PowerShell 脚本调用 DMXAPI 容错链。
+我的主模型不能看图也不能生图。但我有三条视觉通道：
+
+| 通道 | 工具 | 成本 | 适用场景 |
+|------|------|------|---------|
+| 1 | Browser `snapshot` | 免费·即时 | 网页文字/报错/UI 文本提取 |
+| 2 | `describe-image.ps1` | VLM API | 真实图片/图表/照片理解 |
+| 3 | `generate-image.ps1` | 生图 API | 文本→图片生成 |
+
+### 场景决策树（先判断，再调用）
+
+```
+收到视觉相关请求
+├── 目标是网页/URL？
+│   ├── 要"看内容/报错/文字" → snapshot（免费即时）
+│   ├── 要"看布局/长什么样/设计" → screenshot
+│   ├── snapshot 不可用时 → web_fetch_exa 降级
+│   └── 需要登录/交互 → open + showWindow=true + snapshot
+│
+├── 目标是本地图片文件？
+│   ├── 单图描述 → describe-image.ps1 -Quiet
+│   ├── 多图对比 → 并行调用 describe-image.ps1
+│   └── 图表/数据提取 → describe-image.ps1 + 自定义 Prompt
+│
+└── 目标是生成图片？
+    ├── 从零生成 → generate-image.ps1 -Prompt + -Quiet
+    └── 基于已有图改风格 → 先 describe → 融合描述 → generate
+```
 
 ### 脚本位置
 
 ```
-./scripts/describe-image.ps1   # 识图
-./scripts/generate-image.ps1   # 生图
+./scripts/describe-image.ps1   # 识图（Vision API）
+./scripts/generate-image.ps1   # 生图（ImageGen API）
+./scripts/test-pipeline.ps1    # 通道连通性诊断
 ```
 
-### 触发规则
+### 通道 1：Browser snapshot/screenshot（优先——免费即时）
 
-**识图**——以下情况调用 `describe-image.ps1`：
-- 用户发来一张图片（无论是否有文字描述）
-- 用户说"看看这张图""描述这张图""这张图里有什么"
-- 用户要求在图片基础上做分析（如"分析这张图表""这截图里的报错是什么"）
+以下情况**不调用** `describe-image.ps1`，直接用 Browser 工具：
+- 用户发来 URL 说"看看这个""打开XX""有没有报错"
+- 网页文字内容提取、报错信息阅读、UI 布局确认
+- snapshot 获取文本内容，screenshot 获取视觉效果
+
+### 通道 2：describe-image.ps1（VLM 理解——按需调用）
+
+以下情况调用 `describe-image.ps1`：
+- 用户发来本地图片文件（照片、保存的截图、图表）
+- 用户说"描述这张图""这张图里有什么""分析这张图表"
+- **多图对比**：用户发多张图说"比较一下"→ 并行调用
 
 调用方式：
 ```powershell
@@ -94,7 +128,9 @@ powershell -File "./scripts/describe-image.ps1" -ImagePath "<图片路径>" -Qui
 ```
 `-Quiet` 输出纯文本描述，适合 Agent 直接消费。
 
-**生图**——以下情况调用 `generate-image.ps1`：
+### 通道 3：generate-image.ps1（生图）
+
+以下情况调用 `generate-image.ps1`：
 - 用户说"生成一张图""画一个""帮我做张海报"
 - 用户描述视觉需求并要求输出图片
 
@@ -102,12 +138,13 @@ powershell -File "./scripts/describe-image.ps1" -ImagePath "<图片路径>" -Qui
 ```powershell
 powershell -File "./scripts/generate-image.ps1" -Prompt "<描述>" -Quiet
 ```
-可选参数：`-Size "1024x1024"`、`-N 4`（一次生成多张）。
+可选参数：`-Size "1024x1024"`、`-N 4`。
 
-**识图 + 生图组合**——用户说"把这张图改成XX风格""基于这张图生成YY"时：
-1. 先调 `describe-image.ps1` 获取图片描述
-2. 将描述与新要求融合为生图 prompt
-3. 再调 `generate-image.ps1` 生成
+### 组合工作流
+
+- **网页→截图→识图**："看看这个网站长什么样"→ screenshot → 深度分析时 describe
+- **识图→生图**："把这张图改成XX风格"→ 先 describe → 融合描述 → generate
+- **管道故障诊断**："图像功能挂了""通道有问题"→ 运行 `test-pipeline.ps1`
 ```
 
 ## 通道架构
