@@ -29,7 +29,14 @@
 
 param(
     [Parameter(Mandatory=$true, HelpMessage="图片文件路径")]
-    [ValidateScript({ Test-Path $_ })]
+    [ValidateScript({
+        if (-not (Test-Path $_)) { throw "文件不存在: $_" }
+        $ext = [System.IO.Path]::GetExtension($_).TrimStart('.').ToLower()
+        if ($ext -notin @('png','jpg','jpeg','webp','gif','bmp')) { throw "不支持的图片格式: .$ext（支持 png/jpg/jpeg/webp/gif/bmp）" }
+        if ((Get-Item $_).Length -eq 0) { throw "图片文件为空" }
+        if ((Get-Item $_).Length -gt 50MB) { throw "图片文件过大 (最大 50MB)" }
+        return $true
+    })]
     [string]$ImagePath,
 
     [Parameter(HelpMessage="自定义提示词")]

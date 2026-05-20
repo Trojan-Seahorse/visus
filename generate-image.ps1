@@ -55,6 +55,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ── 输入校验 ──
+if ($Prompt.Length -lt 2) {
+    Write-Error "提示词过短（最少 2 个字符）"
+    exit 4
+}
+if ($Prompt.Length -gt 4000) {
+    Write-Warning "提示词较长 ($($Prompt.Length) 字符)，部分 API 可能截断到 4000 字符以内"
+}
+
 # ── 加载认证模块 ──
 $script_dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $auth_module = Join-Path $script_dir "dmxapi-auth.ps1"
