@@ -7,6 +7,9 @@
       .\generate-image.ps1 -Prompt "一只蓝色的猫" -OutputFile "cat.png"
       .\generate-image.ps1 -Prompt "a blue cat" -Size "1024x1024" -N 2
       .\generate-image.ps1 -Prompt "山水画" -Output file -OutputFile "landscape.png"
+	      .\generate-image.ps1 -Prompt "logo" -Background opaque -OutputFormat webp
+	      .\generate-image.ps1 -Prompt "logo" -Quality low
+	      .\generate-image.ps1 -Prompt "photo" -OutputFormat jpeg -OutputCompression 85
 
     默认自动按优先级重试 6 个生图通道，无需手动指定模型。
     如需强制指定单模型: -ForceModel "gpt-image-2"
@@ -34,13 +37,28 @@ param(
     [Parameter(HelpMessage="输出图片路径")]
     [string]$OutputFile,
 
-    [Parameter(HelpMessage="图片尺寸")]
-    [ValidateSet("1024x1024", "1024x1536", "1536x1024", "1024x768", "768x1024")]
+    [Parameter(HelpMessage="图片尺寸（gpt-image-2 支持任意 WxH，16倍数，≤3840px，1:3~3:1 比例）")]
     [string]$Size = "1024x1024",
+
+    [Parameter(HelpMessage="渲染质量: low（快速草稿）/ medium / high / auto（默认）")]
+    [ValidateSet("low", "medium", "high", "auto")]
+    [string]$Quality = "auto",
 
     [Parameter(HelpMessage="生成张数")]
     [ValidateRange(1, 4)]
     [int]$N = 1,
+
+    [Parameter(HelpMessage="背景处理: opaque（不透明）/ auto（自动）| ⚠️ gpt-image-2 不支持 transparent")]
+    [ValidateSet("opaque", "auto")]
+    [string]$Background,
+
+    [Parameter(HelpMessage="输出格式: png / jpeg / webp（默认 png）")]
+    [ValidateSet("png", "jpeg", "webp")]
+    [string]$OutputFormat = "png",
+
+    [Parameter(HelpMessage="输出压缩级别 0-100（仅 jpeg/webp 有效）")]
+    [ValidateRange(0, 100)]
+    [int]$OutputCompression = -1,
 
     [Parameter(HelpMessage="强制指定单模型（跳过容错链）")]
     [string]$ForceModel,
@@ -74,12 +92,21 @@ if (-not (Test-Path $auth_module)) {
 . $auth_module
 
 # ── 构建请求体 ──
-$body = @{
+$bodyTable = @{
     model  = "__placeholder__"  # 容错引擎会注入
     prompt = $Prompt
     size   = $Size
     n      = $N
-} | ConvertTo-Json -Depth 4
+}
+if ($Quality -and $Quality -ne "auto") { $bodyTable["quality"] = $Quality }
+if ($Background)                   { $bodyTable["background"] = $Background }
+if ($OutputFormat -ne "png")       { $bodyTable["output_format"] = $OutputFormat }
+if ($OutputCompression -ge 0)      { $bodyTable["output_compression"] = $OutputCompression }
+$body = $bodyTable | ConvertTo-Json -Depth 4
+
+# ── 输出文件扩展名映射 ──
+$extMap = @{ "png" = ".png"; "jpeg" = ".jpg"; "webp" = ".webp" }
+$defaultExt = $extMap[$OutputFormat]
 
 # ── 决定通道列表 ──
 if ($ForceModel) {
@@ -113,9 +140,9 @@ try {
             if ($OutputFile -and $img_idx -eq 1) {
                 $img_path = $OutputFile
             } elseif ($OutputFile) {
-                $img_path = $OutputFile -replace '\.png$', "_${img_idx}.png"
+                $img_path = $OutputFile -replace '\.(png|jpg|jpeg|webp)$', "_${img_idx}`$1"
             } else {
-                $img_path = Join-Path $output_dir "lumen_gen_$(Get-Date -Format 'yyyyMMddHHmmss')_${img_idx}.png"
+                $img_path = Join-Path $output_dir "lumen_gen_$(Get-Date -Format 'yyyyMMddHHmmss')_${img_idx}$defaultExt"
             }
             $bytes = [Convert]::FromBase64String($item.b64_json)
             [System.IO.File]::WriteAllBytes($img_path, $bytes)
