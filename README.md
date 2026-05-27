@@ -8,30 +8,94 @@
 
 ---
 
-## 前置条件
+## 文件结构
+
+克隆仓库后，你会看到以下文件：
+
+```
+visus/
+├── secure-setup.ps1       # 密钥配置（仅需运行一次）
+├── dmxapi-auth.ps1        # 认证模块 + 容错引擎（被其他脚本引用）
+├── describe-image.ps1     # 识图——图片 → 文本描述
+├── generate-image.ps1     # 生图——文本 → 图片
+├── edit-image.ps1         # 图编辑——修改/合成/遮罩/去背景
+├── test-pipeline.ps1      # 通道连通性诊断
+├── test-edit-api.ps1      # 编辑 API 连通性测试
+├── README.md              # 本文件
+├── README_EN.md           # 英文文档
+└── LICENSE                # CC BY-NC-ND 4.0
+```
+
+**所有脚本必须放在同一目录下**（`dmxapi-auth.ps1` 会被其他脚本通过相对路径引用）。
+
+## 安装步骤
+
+### 前置条件
 
 | 条件 | 说明 |
 |------|------|
 | Windows | DPAPI 加密依赖 Windows 用户隔离 |
 | PowerShell 5.1+ | 系统自带，无需额外安装 |
+| Python 3 + requests | 仅 `edit-image.ps1` 需要（处理 multipart 上传） |
 | DMXAPI 账号 | 注册 https://www.dmxapi.cn，获取 API key |
 | 模型权限 | DMXAPI 后台勾选全部 9 个模型（见下方通道表） |
 
-## 快速开始
+### 第 1 步：克隆仓库
 
 ```powershell
-# 1. 存储 API key（仅需一次）
+git clone https://github.com/Trojan-Seahorse/visus.git
+cd visus
+```
+
+### 第 2 步：安装 Python 依赖（仅图编辑功能需要）
+
+```powershell
+pip install requests
+```
+
+如果你只需要识图和生图（不需要 `edit-image.ps1`），可以跳过此步。
+
+### 第 3 步：存储 API Key（仅需一次）
+
+```powershell
 .\secure-setup.ps1
 # → 选 [1]，粘贴 DMXAPI 图像 key
+```
 
-# 2. 验证通道连通性（可选）
-.\test-pipeline.ps1
+Key 会通过 Windows DPAPI 加密存储在 `~\.dmxapi\` 目录，绑定当前用户和当前机器。
 
-# 3. 使用
+### 第 4 步：验证通道连通性
+
+```powershell
+# 验证生图 + 识图通道（9 通道）
+.	est-pipeline.ps1
+
+# 验证图编辑通道（2 通道）
+.	est-edit-api.ps1
+```
+
+每个通道显示 `[✓]` 即表示正常。
+
+### 第 5 步：开始使用
+
+```powershell
+# 识图
 .\describe-image.ps1 -ImagePath "截图.png" -Quiet
+
+# 生图
 .\generate-image.ps1 -Prompt "一只蓝色的猫" -Quiet -OutputFile "cat.png"
+
+# 编辑图片
 .\edit-image.ps1 -Mode single -Image "照片.jpg" -Prompt "将背景替换为海滩" -Quiet
 ```
+
+### 第 6 步（可选）：配置 Agent 自动调用
+
+如果你使用 **Claude Code**、**CherryStudio** 或其他 AI Agent，可以让 Agent 自动识别场景并调用对应脚本。
+
+**复制下方「Agent 配置模板」整段内容，粘贴到你的 Agent 人格文件**（`SOUL.md` 或 `CLAUDE.md`）。粘贴后将 `./scripts/` 替换为 visus 脚本所在目录的实际路径。
+
+---
 
 ## 脚本说明
 
@@ -74,7 +138,6 @@
 
 未指定 `-OutputFile` 时，图片自动保存到 `./output/` 目录。
 
-
 ### edit-image.ps1
 
 图编辑管道，支持 5 种模式——所有模式底层均使用 gpt-image-2 的 `/v1/images/edits` 端点。
@@ -113,16 +176,15 @@
 
 ⚠️ **twoStage 注意**：单阶段处理大图约 60–300 秒，两阶段约 6–10 分钟。多数场景单次 `multi` 模式 + 多张参考图即可，两阶段适用于对身份保真度有极高要求的场景。
 
-## Agent 自动调用配置
+---
 
-如果你使用 Claude Code / CherryStudio 等 Agent，将以下规则加入 Agent 人格文件（`SOUL.md` 或 `CLAUDE.md`），Agent 会自动识别场景并选择最优路径。
+## Agent 配置模板
 
-路径示例中的 `./scripts/` 需替换为你的脚本实际存放路径。
+将以下内容复制到你的 Agent 人格文件（`SOUL.md` 或 `CLAUDE.md`）。Agent 将自动根据用户意图选择最优视觉通道。
 
-```markdown
-## 图像与视觉能力
+⚠️ 复制后请将 `./scripts/` 替换为 visus 脚本所在目录的实际路径。
 
-我的主模型不能看图也不能生图。但我有三条视觉通道：
+### 通道总览
 
 | 通道 | 工具 | 成本 | 适用场景 |
 |------|------|------|---------|
@@ -158,7 +220,7 @@
     └── 背景移除（白底输出） → edit-image.ps1 -Mode bgremove
 ```
 
-### 脚本位置
+### 脚本路径
 
 ```
 ./scripts/describe-image.ps1   # 识图（Vision API）
@@ -238,7 +300,8 @@ powershell -File "./scripts/edit-image.ps1" -Mode bgremove -Image "产品.jpg" -
 - **识图→编辑**："把这张图里的XX换成YY"→ 先 describe 确认目标 → 直接用 edit-image
 - **人物替换**：describe 两张图了解内容 → 人脸场景优先用 `-Mode twoStage`；简单物体替换用 `-Mode multi`
 - **管道故障诊断**："图像功能挂了""通道有问题"→ 运行 `test-pipeline.ps1`
-```
+
+---
 
 ## 通道架构
 
@@ -273,7 +336,7 @@ powershell -File "./scripts/edit-image.ps1" -Mode bgremove -Image "产品.jpg" -
 ## 常见问题
 
 **Q: 所有通道都失败了？**  
-运行 `.\test-pipeline.ps1` 诊断。确认：① DMXAPI 余额充足 ② 后台已勾选全部 9 个模型权限 ③ 网络正常。
+运行 `.	est-pipeline.ps1` 诊断。确认：① DMXAPI 余额充足 ② 后台已勾选全部 9 个模型权限 ③ 网络正常。
 
 **Q: Seedream 4.5 返回 HTTP 403？**  
 DMXAPI 侧已知问题，容错引擎会自动跳过该通道，不影响正常使用。
