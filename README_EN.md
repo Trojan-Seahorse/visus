@@ -174,4 +174,4 @@ Edit `$DMXAPI_BASE_URL` and `$ModelChannels` in `dmxapi-auth.ps1`.
 ---
 
 Author: Xi Ewell · Duke Ewell Laboratory  
-License: [CC BY-NC-ND 4.0](LICENSE)
+License: [CC BY-NC-SA 4.0](LICENSE)
